@@ -9,6 +9,7 @@ node {
         def dockerHome = tool 'Docker'
         def mavenHome  = tool 'Maven'
         env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${env.PATH}"
+        echo "Application path: ${env.PATH} "
     }
 
     stage('Checkout') {
