@@ -12,20 +12,18 @@ node {
     }
 
     stage('Checkout') {
-        checkout scm
+         checkout([$class: 'GitSCM',
+             branches: [[name: '*/main']],
+             doGenerateSubmoduleConfigurations: false,
+             extensions: [[$class: 'CleanCheckout']],
+             submoduleCfg: [],
+             userRemoteConfigs: [[credentialsId: 'GitCreds', url: 'https://github.com/rverma2-cse/demo-app.git']]
+         ])
     }
 
     stage('Build'){
         sh "mvn clean install"
     }
-
-    stage('Sonar'){
-        try {
-            sh "mvn sonar:sonar"
-        } catch(error){
-            echo "The sonar server could not be reached ${error}"
-        }
-     }
 
     stage("Image Prune"){
         imagePrune(CONTAINER_NAME)
