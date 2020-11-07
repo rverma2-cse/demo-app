@@ -9,7 +9,7 @@ node {
         def dockerHome = tool 'Docker'
         def mavenHome  = tool 'Maven'
         def gradleHome  = tool 'Gradle'
-        env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${env.PATH}"
+        env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${gradleHome}/bin:${env.PATH}"
         echo "Application path is given here: ${env.PATH} "
     }
 
@@ -39,11 +39,13 @@ node {
         imageBuild(CONTAINER_NAME, CONTAINER_TAG)
     }
 
-    stage('Push to Docker Registry'){
+
+    /*stage('Push to Docker Registry'){
         withCredentials([usernamePassword(credentialsId: 'DockerCreds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             pushToImage(CONTAINER_NAME, CONTAINER_TAG, USERNAME, PASSWORD)
         }
     }
+    */
 
     stage('Run App'){
         runApp(CONTAINER_NAME, CONTAINER_TAG, DOCKER_HUB_USER, HTTP_PORT)
@@ -53,24 +55,36 @@ node {
 
 def stopContainerIfRunning(containerName){
     try {
-        bat "docker ps -f name=$containerName -q | xargs --no-run-if-empty docker container stop"
+        echo "Stopping container $containerName if running"
+         def stdout = powershell(returnStdout: true, script: """
+                foreach ($container in docker ps -q --filter=name=$containerName) {
+                	docker stop $container
+                }
+                """)
+            println stdout
     } catch(error){}
 }
 
 def removeContainerIfExists(containerName){
     try {
-        bat "docker container ls -a -fname=$containerName -q | xargs -r docker container rm"
-    } catch(error){}
+            echo "Removing container $containerName if exists"
+             def stdout = powershell(returnStdout: true, script: """
+                    foreach ($container in docker ps -q --filter=name=$containerName) {
+	                    docker container rm $container
+                    }
+                    """)
+                println stdout
+        } catch(error){}
 }
 
 def imageBuild(containerName, tag){
-    bat "docker build -t $containerName --pull --no-cache ."
+    bat "docker build -t $containerName:$tag  -t $containerName --pull --no-cache ."
     echo "Image build complete"
 }
 
 def pushToImage(containerName, tag, dockerUser, dockerPassword){
     bat "docker login -u $dockerUser -p $dockerPassword"
-    bat "docker tag $containerName $dockerUser/$containerName:$tag"
+    bat "docker tag $containerName:$tag $dockerUser/$containerName:$tag"
     bat "docker push $dockerUser/$containerName:$tag"
     echo "Image push complete"
 }
