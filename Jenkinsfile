@@ -69,7 +69,7 @@ def removeContainerIfExists(containerName){
     try {
             echo "Removing container $containerName if exists"
              def stdout = powershell(returnStdout: true, script: """
-                    foreach ($container in docker ps -q --filter=name=$containerName) {
+                    foreach ($container in docker ps -aq --filter=name=$containerName) {
 	                    docker container rm $container
                     }
                     """)
