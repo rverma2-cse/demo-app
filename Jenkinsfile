@@ -1,96 +1,93 @@
-def CONTAINER_NAME="jenkins-pipeline-test"
-def CONTAINER_TAG="v1.1"
-def DOCKER_HUB_USER="rverma2"
-def HTTP_PORT="8090"
+pipeline {
 
-node {
-
-    stage('Initialize'){
-        def dockerHome = tool 'Docker'
-        def mavenHome  = tool 'Maven'
-        def gradleHome  = tool 'Gradle'
-        env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${gradleHome}/bin:${env.PATH}"
-        echo "Application path is given here: ${env.PATH} "
+    agent {
+        label "master"
     }
 
-    stage('Checkout') {
-         checkout([$class: 'GitSCM',
-             branches: [[name: '*/pipeline']],
-             doGenerateSubmoduleConfigurations: false,
-             extensions: [[$class: 'CleanCheckout']],
-             submoduleCfg: [],
-             userRemoteConfigs: [[credentialsId: 'GitCreds', url: 'https://github.com/rverma2-cse/demo-app.git']]
-         ])
+   stage('Initialize'){
+           def dockerHome = tool 'Docker'
+           def mavenHome  = tool 'Maven'
+           env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${env.PATH}"
+           echo "Application path is given here: ${env.PATH} "
+       }
+
+    environment {
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "http"
+        // Where your Nexus is running. 'nexus-3' is defined in the docker-compose file
+        NEXUS_URL = "localhost:8081"
+        // Repository where we will upload the artifact
+        NEXUS_REPOSITORY = "repository-example"
+        // Jenkins credential id to authenticate to Nexus OSS
+        NEXUS_CREDENTIAL_ID = "NexusCreds"
     }
 
-    stage('Build'){
-        bat "mvn clean install"
-    }
-
-    stage("Stop container if running"){
-        stopContainerIfRunning(CONTAINER_NAME)
-    }
-
-    stage("Delete container if exists"){
-        removeContainerIfExists(CONTAINER_NAME)
-    }
-
-    stage('Image Build'){
-        imageBuild(CONTAINER_NAME, CONTAINER_TAG)
-    }
-
-
-    /*stage('Push to Docker Registry'){
-        withCredentials([usernamePassword(credentialsId: 'DockerCreds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-            pushToImage(CONTAINER_NAME, CONTAINER_TAG, USERNAME, PASSWORD)
-        }
-    }
-    */
-
-    stage('Run App'){
-        runApp(CONTAINER_NAME, CONTAINER_TAG, DOCKER_HUB_USER, HTTP_PORT)
-    }
-
-}
-
-def stopContainerIfRunning(containerName){
-    try {
-        echo "Stopping container $containerName if running"
-         def stdout = powershell(returnStdout: true, script: """
-                foreach ($container in docker ps -q --filter=name=$containerName) {
-                	docker stop $container
+    stages {
+        stage("clone code") {
+            steps {
+                script {
+                    // Let's clone the source
+                    git 'https://github.com/rverma2-cse/demo-app.git';
                 }
-                """)
-            println stdout
-    } catch(error){}
-}
+            }
+        }
 
-def removeContainerIfExists(containerName){
-    try {
-            echo "Removing container $containerName if exists"
-             def stdout = powershell(returnStdout: true, script: """
-                    foreach ($container in docker ps -aq --filter=name=$containerName) {
-	                    docker container rm $container
+        stage("mvn build") {
+            steps {
+                script {
+                    // If you are using Windows then you should use "bat" step
+                    // Since unit testing is out of the scope we skip them
+                    sh "mvn package -DskipTests=true"
+                }
+            }
+        }
+
+        stage("publish to nexus") {
+            steps {
+                script {
+                    // Read POM xml file using 'readMavenPom' step , this step 'readMavenPom' is included in: https://plugins.jenkins.io/pipeline-utility-steps
+                    pom = readMavenPom file: "pom.xml";
+                    // Find built artifact under target folder
+                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
+                    // Print some info from the artifact found
+                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
+                    // Extract the path from the File found
+                    artifactPath = filesByGlob[0].path;
+                    // Assign to a boolean response verifying If the artifact name exists
+                    artifactExists = fileExists artifactPath;
+
+                    if(artifactExists) {
+                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
+
+                        nexusArtifactUploader(
+                            nexusVersion: NEXUS_VERSION,
+                            protocol: NEXUS_PROTOCOL,
+                            nexusUrl: NEXUS_URL,
+                            groupId: pom.groupId,
+                            version: pom.version,
+                            repository: NEXUS_REPOSITORY,
+                            credentialsId: NEXUS_CREDENTIAL_ID,
+                            artifacts: [
+                                // Artifact generated such as .jar, .ear and .war files.
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: artifactPath,
+                                type: pom.packaging],
+
+                                // Lets upload the pom.xml file for additional information for Transitive dependencies
+                                [artifactId: pom.artifactId,
+                                classifier: '',
+                                file: "pom.xml",
+                                type: "pom"]
+                            ]
+                        );
+
+                    } else {
+                        error "*** File: ${artifactPath}, could not be found";
                     }
-                    """)
-                println stdout
-        } catch(error){}
-}
+                }
+            }
+        }
 
-def imageBuild(containerName, tag){
-    bat "docker build -t $containerName:$tag  -t $containerName --pull --no-cache ."
-    echo "Image build complete"
-}
-
-def pushToImage(containerName, tag, dockerUser, dockerPassword){
-    bat "docker login -u $dockerUser -p $dockerPassword"
-    bat "docker tag $containerName:$tag $dockerUser/$containerName:$tag"
-    bat "docker push $dockerUser/$containerName:$tag"
-    echo "Image push complete"
-}
-
-def runApp(containerName, tag, dockerHubUser, httpPort){
-    bat "docker pull $dockerHubUser/$containerName:$tag"
-    bat "docker run -d --rm -p $httpPort:$httpPort --name $containerName $dockerHubUser/$containerName:$tag"
-    echo "Application started on port: ${httpPort} (http)"
+    }
 }
