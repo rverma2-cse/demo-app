@@ -4,13 +4,6 @@ pipeline {
         label "master"
     }
 
-   stage('Initialize'){
-           def dockerHome = tool 'Docker'
-           def mavenHome  = tool 'Maven'
-           env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${env.PATH}"
-           echo "Application path is given here: ${env.PATH} "
-       }
-
     environment {
         NEXUS_VERSION = "nexus3"
         NEXUS_PROTOCOL = "http"
@@ -20,9 +13,15 @@ pipeline {
         NEXUS_REPOSITORY = "repository-example"
         // Jenkins credential id to authenticate to Nexus OSS
         NEXUS_CREDENTIAL_ID = "NexusCreds"
+
+        def dockerHome = tool 'Docker'
+        def mavenHome  = tool 'Maven'
+        env.PATH = "${dockerHome}/bin:${mavenHome}/bin:${env.PATH}"
+        echo "Application path is given here: ${env.PATH} "
     }
 
     stages {
+
         stage("clone code") {
             steps {
                 script {
